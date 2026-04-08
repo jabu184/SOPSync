@@ -1,5 +1,7 @@
 # SOPSync & Radiotherapy Status Dashboard
 
+<img width="2495" height="1325" alt="image" src="https://github.com/user-attachments/assets/206dd272-1777-4de7-9756-9f278a7e4e45" />
+
 This repository contains two integrated applications designed for clinical and physics department use:
 
 1. **SOPSync**: A Python Flask web application that automatically extracts metadata from standard operating procedure (SOP) PDFs, stores them in an SQLite database, and provides a dashboard to track upcoming document expirations.
