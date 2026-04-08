@@ -1,6 +1,6 @@
 # SOPSync & Radiotherapy Status Dashboard
 
-<img width="2495" height="1325" alt="image" src="https://github.com/user-attachments/assets/206dd272-1777-4de7-9756-9f278a7e4e45" />
+<img width="2495" height="1325" alt="image" src="https://github.com/user-attachments/assets/fd27c1f3-3795-4760-ae37-228b8a2b0c36" />
 
 This repository contains two integrated applications designed for clinical and physics department use:
 
