@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Local App Data
+*.db
+last_sync.txt
+Formatted/

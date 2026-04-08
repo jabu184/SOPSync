@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOP Quality Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body, .card, .navbar, .table, td, th { transition: all 0.2s ease; }
+        
+        /* Theme Variables */
+        [data-bs-theme="dark"] body { background-color: #0f111a; color: #e1e1e6; }
+        [data-bs-theme="dark"] .navbar { background-color: #1a1d29; border-bottom: 1px solid #2d3142; }
+        [data-bs-theme="dark"] .stat-card { background-color: #1a1d29; border: 1px solid #2d3142; }
+        [data-bs-theme="dark"] .sop-link { color: #64ffda !important; text-shadow: 0 0 5px rgba(100, 255, 218, 0.2); }
+        
+        [data-bs-theme="light"] body { background-color: #f8f9fa; color: #212529; }
+        [data-bs-theme="light"] .navbar { background-color: #ffffff; border-bottom: 1px solid #dee2e6; }
+        [data-bs-theme="light"] .stat-card { background-color: #ffffff; border: 1px solid #dee2e6; }
+        [data-bs-theme="light"] .sop-link { color: #0056b3 !important; }
+
+        /* Navigation & Header */
+        .stat-card { cursor: pointer; transition: transform 0.1s ease; }
+        .stat-card:hover { transform: translateY(-2px); border-color: #64ffda !important; }
+        .active-filter { border: 2px solid #64ffda !important; background-color: rgba(100, 255, 218, 0.05) !important; }
+
+        .sop-link { font-weight: 700; text-decoration: none; font-size: 1rem; letter-spacing: 0.5px; }
+        .table thead th { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; padding: 10px; background-color: rgba(0,0,0,0.05); }
+        .table thead th a { color: inherit; text-decoration: none; display: block; width: 100%; }
+        .table thead th a:hover { color: #64ffda; }
+        
+        .status-badge { padding: 4px 10px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+        .bg-expired { background-color: #dc3545; color: white; }
+        .bg-warning { background-color: #fd7e14; color: white; }
+        .bg-current { background-color: #198754; color: white; }
+
+        .stat-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px; color: #8892b0; }
+        .stat-value { font-size: 1.1rem; font-weight: 700; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar d-flex justify-content-between mb-3 py-2">
+    <div class="d-flex align-items-center gap-3 px-3">
+        <span class="navbar-brand fw-bold m-0" style="font-size: 1.1rem;">🛡️ SOP System</span>
+        <button class="btn btn-sm btn-outline-secondary py-0" id="themeToggle" style="font-size: 0.75rem;">🌓 Theme</button>
+    </div>
+    <div class="px-3 small opacity-75" style="font-size: 0.75rem;">
+        Refreshed: <span class="text-info">{{ sops[0].last_updated if sops else 'N/A' }}</span>
+    </div>
+</nav>
+
+<div class="container-fluid px-4">
+    
+    <div class="row g-2 align-items-center mb-3">
+        <div class="col-xl-5 col-lg-6">
+            <div class="d-flex gap-2">
+                <div class="card stat-card flex-fill text-center py-1 {{ 'active-filter' if current_filter == 'all' }}" 
+                     onclick="location.href='/?filter=all&search={{ search }}&sort={{ sort }}&order={{ order }}'">
+                    <div class="stat-label">Total</div>
+                    <div class="stat-value">{{ stats.total }}</div>
+                </div>
+                <div class="card stat-card flex-fill text-center py-1 border-start border-success border-3 {{ 'active-filter' if current_filter == 'current' }}" 
+                     onclick="location.href='/?filter=current&search={{ search }}&sort={{ sort }}&order={{ order }}'">
+                    <div class="stat-label">Current</div>
+                    <div class="stat-value text-success">{{ stats.current }}</div>
+                </div>
+                <div class="card stat-card flex-fill text-center py-1 border-start border-warning border-3 {{ 'active-filter' if current_filter == 'warning' }}" 
+                     onclick="location.href='/?filter=warning&search={{ search }}&sort={{ sort }}&order={{ order }}'">
+                    <div class="stat-label">Due</div>
+                    <div class="stat-value" style="color: #fd7e14;">{{ stats.warning }}</div>
+                </div>
+                <div class="card stat-card flex-fill text-center py-1 border-start border-danger border-3 {{ 'active-filter' if current_filter == 'expired' }}" 
+                     onclick="location.href='/?filter=expired&search={{ search }}&sort={{ sort }}&order={{ order }}'">
+                    <div class="stat-label">Expired</div>
+                    <div class="stat-value text-danger">{{ stats.expired }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-7 col-lg-6 text-end">
+            <div class="d-flex gap-2 justify-content-end">
+                <form action="/" method="GET" class="d-flex gap-1 flex-grow-1" style="max-width: 350px;">
+                    <input type="hidden" name="filter" value="{{ current_filter }}">
+                    <input type="text" name="search" class="form-control form-control-sm" placeholder="Search..." value="{{ search }}">
+                    <button type="submit" class="btn btn-sm btn-primary">Find</button>
+                    {% if search or current_filter != 'all' %}<a href="/" class="btn btn-sm btn-outline-secondary">Clear</a>{% endif %}
+                </form>
+                <a href="/export?search={{ search }}&sort={{ sort }}&order={{ order }}&filter={{ current_filter }}" class="btn btn-sm btn-success">📊 Export</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card stat-card shadow-sm border-0 mb-4" style="cursor: default !important; transform: none !important;">
+        <div class="table-responsive">
+            <table class="table align-middle mb-0" id="sopTable" style="font-size: 0.85rem;">
+                <thead>
+                    <tr>
+                        {% set next_order = 'desc' if order == 'asc' else 'asc' %}
+                        <th><a href="/?sort=id&order={{ next_order }}&search={{ search }}&filter={{ current_filter }}">ID ↕</a></th>
+                        <th style="width: 30%;"><a href="/?sort=title&order={{ next_order }}&search={{ search }}&filter={{ current_filter }}">Title ↕</a></th>
+                        <th><a href="/?sort=version&order={{ next_order }}&search={{ search }}&filter={{ current_filter }}">Ver ↕</a></th>
+                        <th><a href="/?sort=authors&order={{ next_order }}&search={{ search }}&filter={{ current_filter }}">Author ↕</a></th>
+                        <th><a href="/?sort=approved&order={{ next_order }}&search={{ search }}&filter={{ current_filter }}">Approved ↕</a></th>
+                        <th><a href="/?sort=next_review&order={{ next_order }}&search={{ search }}&filter={{ current_filter }}">Due Date ↕</a></th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sop in sops %}
+                    <tr data-status="{{ 'expired' if sop.expired else ('warning' if sop.days_left < 90 else 'current') }}">
+                        <td><a href="/download/{{ sop.id }}.pdf" target="_blank" class="sop-link">{{ sop.id }}</a></td>
+                        <td>
+                            <div class="fw-bold" style="line-height: 1.2;">{{ sop.title }}</div>
+                            <small class="opacity-50" style="font-size: 0.7rem;">{{ sop.keywords }}</small>
+                        </td>
+                        <td><code class="text-info fw-bold">{{ sop.version }}</code></td>
+                        <td><small>{{ sop.authors }}</small></td>
+                        <td><small>{{ sop.approved }}</small></td>
+                        <td>{{ sop.next_review }}</td>
+                        <td>
+                            {% if sop.expired %}<span class="status-badge bg-expired">EXPIRED</span>
+                            {% elif sop.days_left < 90 %}<span class="status-badge bg-warning">{{ sop.days_left }}d</span>
+                            {% else %}<span class="status-badge bg-current">OK</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Theme Toggle
+    const themeToggle = document.getElementById('themeToggle');
+    const htmlElement = document.documentElement;
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    htmlElement.setAttribute('data-bs-theme', savedTheme);
+
+    themeToggle.addEventListener('click', () => {
+        const currentTheme = htmlElement.getAttribute('data-bs-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        htmlElement.setAttribute('data-bs-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+    });
+
+    // On Load: Hide rows based on the Filter passed from URL
+    window.onload = function() {
+        const filter = "{{ current_filter }}";
+        if (filter !== 'all') {
+            const rows = document.querySelectorAll('#sopTable tbody tr');
+            rows.forEach(row => {
+                row.style.display = (row.getAttribute('data-status') === filter) ? '' : 'none';
+            });
+        }
+    };
+</script>
+</body>
+</html>
