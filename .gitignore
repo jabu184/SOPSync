@@ -9,3 +9,4 @@ node_modules/
 *.db
 last_sync.txt
 Formatted/
+authors.txt
