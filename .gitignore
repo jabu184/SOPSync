@@ -1,12 +1,9 @@
-# Python
-__pycache__/
-*.pyc
-
-# Node
-node_modules/
-
-# Local App Data
+# SQLite Database
 *.db
-last_sync.txt
+
+# Local state and backups
 Formatted/
-authors.txt
+last_sync.txt
+
+# Python cache
+__pycache__/

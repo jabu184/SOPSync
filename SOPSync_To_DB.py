@@ -3,6 +3,7 @@ import os
 import sqlite3
 import re
 import shutil
+import pandas as pd
 from datetime import datetime
 
 # --- 1. HELPER FUNCTIONS (Must be defined before run_extraction) ---
@@ -62,6 +63,9 @@ def run_extraction(search_path=None):
     for root, dirs, files in os.walk(target_dir):
         # Skip the Formatted folder to prevent infinite loops
         if "Formatted" in root: continue
+
+        # Determine if the file sits anywhere inside a folder named "Archived"
+        is_archived_file = 1 if 'archived' in root.lower() else 0
 
         for filename in files:
             if filename.lower().endswith('.pdf'):
@@ -134,31 +138,127 @@ def run_extraction(search_path=None):
                         apprs = replace_initials(pdf_data.get('appr', ''), author_map)
 
                         # --- THE ARCHIVE FIX ---
-                        # 1. Insert the record if it doesn't exist (default to active/0)
-                        cursor.execute("INSERT OR IGNORE INTO sops (id, is_archived) VALUES (?, 0)", (uid,))
+                        # 1. Insert the record if it doesn't exist (use is_archived_file)
+                        cursor.execute("INSERT OR IGNORE INTO sops (id, is_archived) VALUES (?, ?)", (uid, is_archived_file))
                         
-                        # 2. Update all metadata but DO NOT TOUCH the is_archived column
+                        # 2. Update all metadata and automatically set the archive status based on the folder location
                         cursor.execute("""
                             UPDATE sops SET 
                                 title=?, ref=?, version=?, authors=?, approved=?, 
                                 issue_date=?, next_review=?, keywords=?, filename=?, 
-                                last_updated=?, original_path=?
+                                last_updated=?, original_path=?, is_archived=?
                             WHERE id=?
                         """, (title, doc_ref, pdf_data.get('ver'), auths, apprs, 
                               pdf_data.get('issue', ''), pdf_data.get('next'), pdf_data.get('keywords', ''), filename, 
-                              current_time, full_path, uid))
+                              current_time, full_path, is_archived_file, uid))
                         
-                        # Update the renamed backup
-                        try:
-                            shutil.copy2(full_path, os.path.join(formatted_folder, f"{uid}.pdf"))
-                        except:
-                            pass 
+                        # Only copy to the Formatted backup folder if it's NOT archived
+                        if not is_archived_file:
+                            try:
+                                shutil.copy2(full_path, os.path.join(formatted_folder, f"{uid}.pdf"))
+                            except:
+                                pass 
 
                         files_updated += 1
                         print(f"Updated: {uid} | Status Preserved | Source: {filename}")
 
                 except Exception as e:
                     print(f"Error processing {filename}: {e}")
+                        
+            # --- SPREADSHEET SCRAPING LOGIC ---
+            elif filename.lower().endswith(('.xlsx', '.xls', '.csv', '.xlsm')):
+                full_path = os.path.abspath(os.path.join(root, filename))
+                try:
+                    # Read the first 50 rows to look for metadata
+                    if filename.lower().endswith('.csv'):
+                        df = pd.read_csv(full_path, header=None, nrows=50)
+                    else:
+                        # Removing nrows and setting the engine prevents parsing errors with .xlsm files
+                        engine_choice = 'openpyxl' if filename.lower().endswith(('.xlsx', '.xlsm')) else None
+                        df = pd.read_excel(full_path, header=None, engine=engine_choice)
+                    
+                    if df.empty or len(df.columns) < 2:
+                        continue
+                        
+                    def get_cell_val(r, c, is_date=False):
+                        if r < len(df) and c < len(df.columns):
+                            val = df.iat[r, c]
+                            if pd.isna(val):
+                                return ""
+                            # If it's a date cell and pandas parsed it as a datetime object
+                            if is_date and isinstance(val, (datetime, pd.Timestamp)):
+                                return val.strftime("%d %b %Y")
+                            # Otherwise, return as string
+                            return str(val).strip()
+                        return ""
+
+                    doc_data = {
+                        'title': get_cell_val(4, 1),  # B5
+                        'ref': get_cell_val(8, 3),    # D9
+                        'ver': get_cell_val(9, 3),    # D10
+                        'auth': get_cell_val(10, 3),  # D11
+                        'appr': get_cell_val(11, 3),  # D12
+                        'issue': get_cell_val(12, 3, is_date=True), # D13
+                        'next': get_cell_val(13, 3, is_date=True)   # D14
+                    }
+                    
+                    raw_keywords = [
+                        get_cell_val(16, 3), get_cell_val(17, 3), get_cell_val(18, 3), # D17, D18, D19
+                        get_cell_val(16, 6), get_cell_val(17, 6), get_cell_val(18, 6)  # G17, G18, G19
+                    ]
+                    
+                    keywords_list = []
+                    for cell in raw_keywords:
+                        if cell:
+                            for word in str(cell).split('\n'):
+                                if word.strip() and word.strip().lower() != 'none':
+                                    keywords_list.append(word.strip())
+                                    
+                    doc_data['keywords'] = ", ".join(keywords_list)
+                    
+                    # Generate Clean ID
+                    doc_ref = doc_data.get('ref', 'XX-0')
+                    prefix = "X" + doc_ref[:2].upper()
+                    ref_num = "".join(re.findall(r'\d+', doc_ref))
+                    uid = f"{prefix}{ref_num}"
+                    
+                    # Use Title from spreadsheet if found, else fallback to filename
+                    title = doc_data.get('title') or os.path.splitext(filename)[0]
+                    
+                    # --- SMART GATE ---
+                    cursor.execute("SELECT version, next_review, original_path FROM sops WHERE id = ?", (uid,))
+                    existing = cursor.fetchone()
+                    if existing and str(existing[0]) == str(doc_data.get('ver')) and \
+                       str(existing[1]) == str(doc_data.get('next')) and \
+                       str(existing[2]) == str(full_path):
+                        continue 
+                        
+                    auths = replace_initials(doc_data.get('auth', ''), author_map)
+                    apprs = replace_initials(doc_data.get('appr', ''), author_map)
+                    
+                    cursor.execute("INSERT OR IGNORE INTO sops (id, is_archived) VALUES (?, ?)", (uid, is_archived_file))
+                    cursor.execute("""
+                        UPDATE sops SET 
+                            title=?, ref=?, version=?, authors=?, approved=?, 
+                            issue_date=?, next_review=?, keywords=?, filename=?, 
+                            last_updated=?, original_path=?, is_archived=?
+                        WHERE id=?
+                    """, (title, doc_ref, doc_data.get('ver'), auths, apprs, 
+                          doc_data.get('issue', ''), doc_data.get('next'), doc_data.get('keywords', ''), filename, 
+                          current_time, full_path, is_archived_file, uid))
+                          
+                    if not is_archived_file:
+                        try:
+                            ext = os.path.splitext(filename)[1].lower()
+                            shutil.copy2(full_path, os.path.join(formatted_folder, f"{uid}{ext}"))
+                        except:
+                            pass 
+                        
+                    files_updated += 1
+                    print(f"Updated: {uid} | Status Preserved | Source: {filename}")
+                    
+                except Exception as e:
+                    print(f"Error processing spreadsheet {filename}: {e}")
 
     conn.commit()
     conn.close()

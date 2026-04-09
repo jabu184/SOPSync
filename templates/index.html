@@ -33,7 +33,7 @@
 <nav class="navbar px-4 mb-2 border-bottom border-secondary">
     <div class="container-fluid p-0">
         <div class="d-flex align-items-center gap-3">
-            <span class="navbar-brand fw-bold m-0">🛡️ MVCC SOPSync v1.5</span>
+            <span class="navbar-brand fw-bold m-0">🛡️ MVCC SOPSync v1.6</span>
             <button class="btn btn-sm btn-outline-secondary" id="themeToggle">🌓 Theme</button>
         </div>
 
@@ -74,7 +74,7 @@
                     </button>
                 {% endif %}
                 <a href="/export-csv?filter={{ current_filter }}&search={{ search }}" class="btn btn-sm btn-outline-success px-3 d-flex align-items-center">📊 Export CSV</a>
-                <a href="/download-all" class="btn btn-sm btn-outline-warning px-3 d-flex align-items-center" title="Download all Formatted PDFs as a single ZIP archive">🗂️ Download ZIP</a>
+                <a href="/download-all?filter={{ current_filter }}&search={{ search }}" class="btn btn-sm btn-outline-warning px-3 d-flex align-items-center" title="Download all Formatted PDFs as a single ZIP archive">🗂️ Download ZIP</a>
             </div>
         </div>
     </div>
@@ -141,7 +141,7 @@
                 <tr class="{{ 'is-archived-row' if sop.is_archived }}" data-status="{{ status_tag }}" data-archived="{{ 'true' if sop.is_archived else 'false' }}">
                     <td><a href="/open_pdf/{{ sop.id }}" target="_blank" class="sop-link">{{ sop.id }}</a></td>
                     <td>
-                        <div class="fw-bold">{{ sop.title }}</div>
+                        <div class="fw-bold"><span class="badge bg-secondary me-2">{{ sop.file_icon }}</span>{{ sop.title }}</div>
                         {% if sop.keywords %}
                         <div class="small text-secondary fst-italic mt-1">Keywords: {{ sop.keywords }}</div>
                         {% endif %}

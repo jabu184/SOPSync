@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import sqlite3, os, pandas as pd, zipfile, shutil
+import mimetypes
 from io import BytesIO
 from datetime import datetime
 
@@ -105,12 +106,17 @@ def open_pdf(doc_id):
         target = row['original_path']
         # Check if the original file exists at the source
         if os.path.exists(target):
-            return send_file(target, mimetype='application/pdf')
+            mime_type, _ = mimetypes.guess_type(target)
+            return send_file(target, mimetype=mime_type or 'application/octet-stream')
     
-    # If original is missing, try the renamed backup
-    fallback = os.path.join(BASE_DIR, 'Formatted', f"{doc_id}.pdf")
-    if os.path.exists(fallback):
-        return send_file(fallback, mimetype='application/pdf')
+    # If original is missing, try to find the document in the renamed backup folder
+    formatted_dir = os.path.join(BASE_DIR, 'Formatted')
+    if os.path.exists(formatted_dir):
+        for f in os.listdir(formatted_dir):
+            if f.startswith(f"{doc_id}."):
+                fallback = os.path.join(formatted_dir, f)
+                mime_type, _ = mimetypes.guess_type(fallback)
+                return send_file(fallback, mimetype=mime_type or 'application/octet-stream')
         
     return f"Error: Document {doc_id} not found at source or backup.", 404
 
@@ -120,10 +126,10 @@ def export_csv():
     search = request.args.get('search', '').strip()
     current_filter = request.args.get('filter', 'all')
 
-    query = "SELECT filename, title, ref AS doc_ref, version, authors, approved AS approved_by, issue_date, next_review, keywords, id AS uniqueid, is_archived FROM sops"
+    query = "SELECT filename, title, ref AS doc_ref, version, authors, approved AS approved_by, issue_date, next_review, keywords, id AS uniqueid, is_archived FROM sops WHERE is_archived = 0"
     params = []
     if search:
-        query += " WHERE (title LIKE ? OR id LIKE ? OR authors LIKE ?)"
+        query += " AND (title LIKE ? OR id LIKE ? OR authors LIKE ?)"
         params = [f'%{search}%', f'%{search}%', f'%{search}%']
 
     df = pd.read_sql_query(query, conn, params=params)
@@ -165,6 +171,48 @@ def toggle_archive(doc_id):
 
 @app.route('/download-all')
 def download_all():
+    conn = get_db_connection()
+    search = request.args.get('search', '').strip()
+    current_filter = request.args.get('filter', 'all')
+
+    # Mirror the search query from the main index route
+    query = "SELECT id, next_review, is_archived FROM sops"
+    params = []
+    if search:
+        query += " WHERE title LIKE ? OR keywords LIKE ? OR id LIKE ? OR authors LIKE ?"
+        params = [f'%{search}%', f'%{search}%', f'%{search}%', f'%{search}%']
+
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+
+    today = datetime.now().date()
+    valid_ids = set()
+
+    for row in rows:
+        d = dict(row)
+        expiry = parse_sop_date(d['next_review'])
+        is_archived = d.get('is_archived') == 1
+        expired = expiry < today
+        days_left = (expiry - today).days
+
+        if is_archived:
+            status = 'archived'
+        elif expired:
+            status = 'expired'
+        elif days_left < 90:
+            status = 'warning'
+        else:
+            status = 'current'
+            
+        if current_filter == 'archived' and status == 'archived':
+            valid_ids.add(d['id'])
+        elif current_filter == 'expired' and status == 'expired':
+            valid_ids.add(d['id'])
+        elif current_filter == 'warning' and status == 'warning':
+            valid_ids.add(d['id'])
+        elif current_filter == 'all' and status != 'archived':
+            valid_ids.add(d['id'])
+
     formatted_dir = os.path.join(BASE_DIR, 'Formatted')
     memory_file = BytesIO()
     
@@ -172,10 +220,12 @@ def download_all():
         if os.path.exists(formatted_dir):
             for root, dirs, files in os.walk(formatted_dir):
                 for file in files:
-                    if file.lower().endswith('.pdf'):
-                        file_path = os.path.join(root, file)
-                        # Add file to zip archive directly at the root level of the zip
-                        zf.write(file_path, arcname=file)
+                    if file.lower().endswith(('.pdf', '.xlsx', '.xls', '.csv', '.xlsm')):
+                        file_id = os.path.splitext(file)[0]
+                        if file_id in valid_ids:
+                            file_path = os.path.join(root, file)
+                            # Add file to zip archive directly at the root level of the zip
+                            zf.write(file_path, arcname=file)
                         
     memory_file.seek(0)
     return send_file(memory_file, 
@@ -211,6 +261,14 @@ def index():
         d['days_left'] = (expiry - today).days
         d['expired'] = expiry < today
         
+        ext = os.path.splitext(d.get('filename', ''))[1].lower()
+        if ext == '.pdf':
+            d['file_icon'] = '📄 PDF'
+        elif ext in ['.xlsx', '.xls', '.csv', '.xlsm']:
+            d['file_icon'] = '📊 Excel'
+        else:
+            d['file_icon'] = '📁 File'
+
         if d.get('is_archived') == 1:
             stats['archived'] += 1
         else:
