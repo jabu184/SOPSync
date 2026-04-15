@@ -5,6 +5,7 @@ from io import BytesIO
 from datetime import datetime
 import threading
 import time
+import sys
 
 # Import the extraction function from your specific filename
 from SOPSync_To_DB import run_extraction, init_db, parse_file, load_author_mapping
@@ -12,7 +13,10 @@ from SOPSync_To_DB import run_extraction, init_db, parse_file, load_author_mappi
 app = Flask(__name__)
 app.secret_key = "sop_dashboard_secure_key_2026"
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DEPARTMENTS = {
     'qa': 'QA & Dosimetry',

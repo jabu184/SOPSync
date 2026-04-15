@@ -5,6 +5,7 @@ import re
 import shutil
 import pandas as pd
 from datetime import datetime
+import sys
 
 # --- 1. HELPER FUNCTIONS (Must be defined before run_extraction) ---
 
@@ -154,7 +155,10 @@ def parse_file(full_path, author_map):
 
 def run_extraction(search_path=None, workspace_dir=None):
     if not workspace_dir:
-        workspace_dir = os.path.dirname(os.path.abspath(__file__))
+        if getattr(sys, 'frozen', False):
+            workspace_dir = os.path.dirname(sys.executable)
+        else:
+            workspace_dir = os.path.dirname(os.path.abspath(__file__))
         
     author_map = load_author_mapping(workspace_dir)
     conn = init_db(workspace_dir)
