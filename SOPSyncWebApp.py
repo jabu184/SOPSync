@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file, redirect, url_for, flash
+from flask import Flask, render_template, request, send_file, redirect, url_for, flash, session
 import sqlite3, os, pandas as pd, zipfile, shutil
 import mimetypes
 from io import BytesIO
@@ -13,19 +13,31 @@ app = Flask(__name__)
 app.secret_key = "sop_dashboard_secure_key_2026"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, 'sop_data.db')
+
+DEPARTMENTS = {
+    'qa': 'QA & Dosimetry',
+    'brachy': 'Brachytherapy',
+    'planning': 'Treatment Planning'
+}
 
 scan_lock = threading.Lock()
 last_auto_scan_time = 0
 
-def background_scan_task(folder):
+def get_workspace_dir():
+    dept = session.get('department', 'qa')
+    if dept not in DEPARTMENTS: dept = 'qa'
+    workspace = os.path.join(BASE_DIR, 'departments', dept)
+    os.makedirs(workspace, exist_ok=True)
+    return workspace
+
+def background_scan_task(folder, workspace_dir):
     try:
-        run_extraction(search_path=folder)
+        run_extraction(search_path=folder, workspace_dir=workspace_dir)
     finally:
         scan_lock.release()
 
 def get_db_connection():
-    conn = init_db(BASE_DIR)
+    conn = init_db(get_workspace_dir())
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -57,9 +69,10 @@ def sync_folders():
         
     try:
         with scan_lock:
-            upload_dir = os.path.join(BASE_DIR, 'Uploaded_SOPs')
+            workspace_dir = get_workspace_dir()
+            upload_dir = os.path.join(workspace_dir, 'Uploaded_SOPs')
             
-            sync_file = os.path.join(BASE_DIR, 'last_sync.txt')
+            sync_file = os.path.join(workspace_dir, 'last_sync.txt')
             if os.path.exists(sync_file):
                 with open(sync_file, 'r') as f:
                     last_synced_folder = f.read().strip()
@@ -71,7 +84,7 @@ def sync_folders():
                     conn.commit()
                     conn.close()
                     
-                    formatted_dir = os.path.join(BASE_DIR, 'Formatted')
+                    formatted_dir = os.path.join(workspace_dir, 'Formatted')
                     if os.path.exists(formatted_dir):
                         shutil.rmtree(formatted_dir, ignore_errors=True)
 
@@ -90,7 +103,7 @@ def sync_folders():
                         os.makedirs(os.path.dirname(safe_path), exist_ok=True)
                         file.save(safe_path)
                         
-            updated_count = run_extraction(search_path=upload_dir)
+            updated_count = run_extraction(search_path=upload_dir, workspace_dir=workspace_dir)
             
             # Save the successfully synced folder to a local cache file
             with open(sync_file, 'w') as f:
@@ -104,7 +117,8 @@ def sync_folders():
 
 @app.route('/sync-previous', methods=['GET', 'POST'])
 def sync_previous():
-    sync_file = os.path.join(BASE_DIR, 'last_sync.txt')
+    workspace_dir = get_workspace_dir()
+    sync_file = os.path.join(workspace_dir, 'last_sync.txt')
     if not os.path.exists(sync_file):
         flash("No previous sync folder recorded.", "warning")
         return redirect(url_for('index'))
@@ -118,7 +132,7 @@ def sync_previous():
         
     try:
         with scan_lock:
-            updated_count = run_extraction(search_path=custom_path)
+            updated_count = run_extraction(search_path=custom_path, workspace_dir=workspace_dir)
         flash(f"Sync Complete! {updated_count} records refreshed from: {custom_path}", "success")
     except Exception as e:
         flash(f"Sync Failed: {str(e)}", "danger")
@@ -140,7 +154,8 @@ def upload_single():
         flash("No file selected.", "warning")
         return redirect(url_for('index'))
         
-    staging_dir = os.path.join(BASE_DIR, 'staging')
+    workspace_dir = get_workspace_dir()
+    staging_dir = os.path.join(workspace_dir, 'staging')
     os.makedirs(staging_dir, exist_ok=True)
     
     clean_name = file.filename.lstrip('/\\')
@@ -148,7 +163,7 @@ def upload_single():
     file.save(safe_path)
     
     # Isolate extraction before writing anything to the main library directory
-    author_map = load_author_mapping(BASE_DIR)
+    author_map = load_author_mapping(workspace_dir)
     parsed = parse_file(safe_path, author_map)
     
     if not parsed:
@@ -170,7 +185,7 @@ def upload_single():
 def confirm_override():
     tmp_file = request.form.get('tmp_file')
     if request.form.get('action') == 'cancel':
-        staging_file = os.path.join(BASE_DIR, 'staging', tmp_file)
+        staging_file = os.path.join(get_workspace_dir(), 'staging', tmp_file)
         if os.path.exists(staging_file): os.remove(staging_file)
         flash("Upload cancelled.", "info")
         return redirect(url_for('index'))
@@ -179,11 +194,12 @@ def confirm_override():
 
 def process_single_upload(tmp_file):
     with scan_lock:
-        staging_file = os.path.join(BASE_DIR, 'staging', tmp_file)
+        workspace_dir = get_workspace_dir()
+        staging_file = os.path.join(workspace_dir, 'staging', tmp_file)
         
         # 1. Determine the currently active sync folder to avoid splitting the library
-        sync_file = os.path.join(BASE_DIR, 'last_sync.txt')
-        target_dir = os.path.join(BASE_DIR, 'Uploaded_SOPs')
+        sync_file = os.path.join(workspace_dir, 'last_sync.txt')
+        target_dir = os.path.join(workspace_dir, 'Uploaded_SOPs')
         if os.path.exists(sync_file):
             with open(sync_file, 'r') as f:
                 saved_dir = f.read().strip()
@@ -193,7 +209,7 @@ def process_single_upload(tmp_file):
         os.makedirs(target_dir, exist_ok=True)
         
         # 2. Extract ID to prevent duplicate files and force a clean DB update
-        author_map = load_author_mapping(BASE_DIR)
+        author_map = load_author_mapping(workspace_dir)
         parsed = parse_file(staging_file, author_map)
         
         if parsed:
@@ -214,7 +230,7 @@ def process_single_upload(tmp_file):
             conn.close()
             
             # Clear out any old versions in the Formatted cache
-            formatted_dir = os.path.join(BASE_DIR, 'Formatted')
+            formatted_dir = os.path.join(workspace_dir, 'Formatted')
             if os.path.exists(formatted_dir):
                 for f in os.listdir(formatted_dir):
                     if f.startswith(f"{parsed['id']}."):
@@ -231,7 +247,7 @@ def process_single_upload(tmp_file):
         shutil.move(staging_file, dest_path)
         
         # 4. Re-scan the folder to pick up the fresh document
-        updated = run_extraction(search_path=target_dir)
+        updated = run_extraction(search_path=target_dir, workspace_dir=workspace_dir)
         
         with open(sync_file, 'w') as f: 
             f.write(target_dir)
@@ -258,7 +274,7 @@ def open_pdf(doc_id):
             return send_file(target, mimetype=mime_type or 'application/octet-stream')
     
     # If original is missing, try to find the document in the renamed backup folder
-    formatted_dir = os.path.join(BASE_DIR, 'Formatted')
+    formatted_dir = os.path.join(get_workspace_dir(), 'Formatted')
     if os.path.exists(formatted_dir):
         for f in os.listdir(formatted_dir):
             if f.startswith(f"{doc_id}."):
@@ -267,6 +283,12 @@ def open_pdf(doc_id):
                 return send_file(fallback, mimetype=mime_type or 'application/octet-stream')
         
     return f"Error: Document {doc_id} not found at source or backup.", 404
+
+@app.route('/switch-department/<dept>')
+def switch_department(dept):
+    if dept in DEPARTMENTS:
+        session['department'] = dept
+    return redirect(request.referrer or url_for('index'))
 
 @app.route('/export-csv')
 def export_csv():
@@ -361,7 +383,7 @@ def download_all():
         elif current_filter == 'all' and status != 'archived':
             valid_ids.add(d['id'])
 
-    formatted_dir = os.path.join(BASE_DIR, 'Formatted')
+    formatted_dir = os.path.join(get_workspace_dir(), 'Formatted')
     memory_file = BytesIO()
     
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -385,7 +407,8 @@ def download_all():
 def index():
     global last_auto_scan_time
     # Trigger an automatic ultra-fast scan on every load
-    sync_file = os.path.join(BASE_DIR, 'last_sync.txt')
+    workspace_dir = get_workspace_dir()
+    sync_file = os.path.join(workspace_dir, 'last_sync.txt')
     last_synced_folder = None
     if os.path.exists(sync_file):
         with open(sync_file, 'r') as f:
@@ -398,7 +421,7 @@ def index():
             if scan_lock.acquire(blocking=False):
                 last_auto_scan_time = current_time
                 # Run in background so the UI doesn't freeze during the scan
-                threading.Thread(target=background_scan_task, args=(last_synced_folder,)).start()
+                threading.Thread(target=background_scan_task, args=(last_synced_folder, workspace_dir)).start()
         
     conn = get_db_connection()
     search = request.args.get('search', '').strip()
@@ -449,7 +472,9 @@ def index():
     else:
         sops.sort(key=lambda x: str(x.get(sort_by, '')).lower(), reverse=reverse)
 
-    return render_template('index.html', sops=sops, search=search, sort=sort_by, order=order, stats=stats, current_filter=current_filter, last_synced_folder=last_synced_folder)
+    current_dept = session.get('department', 'qa')
+
+    return render_template('index.html', sops=sops, search=search, sort=sort_by, order=order, stats=stats, current_filter=current_filter, last_synced_folder=last_synced_folder, departments=DEPARTMENTS, current_dept=current_dept)
 
 if __name__ == '__main__':
     # Change host to '0.0.0.0' to listen on all network interfaces

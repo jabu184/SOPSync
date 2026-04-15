@@ -11,6 +11,11 @@ from datetime import datetime
 def load_author_mapping(root_dir):
     mapping = {}
     auth_file = os.path.join(root_dir, 'authors.txt')
+    
+    # Fallback to parent directory if running inside a department subfolder
+    if not os.path.exists(auth_file) and 'departments' in os.path.abspath(root_dir):
+        auth_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(root_dir))), 'authors.txt')
+        
     if os.path.exists(auth_file):
         try:
             with open(auth_file, 'r', encoding='utf-8') as f:
@@ -147,19 +152,21 @@ def parse_file(full_path, author_map):
 
 # --- 2. MAIN EXTRACTION ENGINE ---
 
-def run_extraction(search_path=None):
-    root_dir = os.path.dirname(os.path.abspath(__file__))
-    author_map = load_author_mapping(root_dir)
-    conn = init_db(root_dir)
+def run_extraction(search_path=None, workspace_dir=None):
+    if not workspace_dir:
+        workspace_dir = os.path.dirname(os.path.abspath(__file__))
+        
+    author_map = load_author_mapping(workspace_dir)
+    conn = init_db(workspace_dir)
     cursor = conn.cursor()
     
-    formatted_folder = os.path.join(root_dir, 'Formatted')
+    formatted_folder = os.path.join(workspace_dir, 'Formatted')
     if not os.path.exists(formatted_folder):
         os.makedirs(formatted_folder)
 
     files_updated = 0
     current_time = datetime.now().strftime("%d %b %Y %H:%M")
-    target_dir = search_path if search_path else root_dir
+    target_dir = search_path if search_path else workspace_dir
 
     # BULK CACHE MTIMES TO PREVENT N+1 QUERIES
     cursor.execute("SELECT original_path, file_mtime FROM sops")
