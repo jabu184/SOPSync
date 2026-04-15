@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirm File Override</title>
+    <link href="{{ url_for('static', filename='bootstrap.min.css') }}" rel="stylesheet">
+    <style>
+        body { background-color: #0f111a; color: #e1e1e6; }
+        .card { background-color: #1a1d29; border: 1px solid #2d3142; }
+    </style>
+</head>
+<body class="d-flex align-items-center justify-content-center vh-100">
+    <div class="card shadow-lg p-4" style="max-width: 600px; width: 100%;">
+        <h4 class="text-warning mb-3">⚠️ Document Already Exists</h4>
+        <p>A document with ID <strong>{{ new_doc.id }}</strong> already exists on the server. Do you want to overwrite it with the newly uploaded file?</p>
+        
+        <div class="row mb-4">
+            <div class="col-6">
+                <div class="p-3 border rounded border-secondary bg-dark bg-opacity-50 h-100">
+                    <h6 class="text-secondary fw-bold">Existing File</h6>
+                    <ul class="list-unstyled small mb-0">
+                        <li class="mb-1"><strong>Title:</strong> {{ existing_doc.title }}</li>
+                        <li class="mb-1"><strong>Version:</strong> <span class="text-info">{{ existing_doc.version }}</span></li>
+                        <li><strong>Issue Date:</strong> {{ existing_doc.issue_date or 'N/A' }}</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="p-3 border rounded border-primary bg-primary bg-opacity-10 h-100">
+                    <h6 class="text-primary fw-bold">New Upload</h6>
+                    <ul class="list-unstyled small mb-0">
+                        <li class="mb-1"><strong>Title:</strong> {{ new_doc.title }}</li>
+                        <li class="mb-1"><strong>Version:</strong> <span class="text-info fw-bold">{{ new_doc.ver }}</span></li>
+                        <li><strong>Issue Date:</strong> {{ new_doc.issue or 'N/A' }}</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <form action="/confirm-override" method="POST" class="d-flex gap-3 justify-content-end">
+            <input type="hidden" name="tmp_file" value="{{ tmp_file }}">
+            <button type="submit" name="action" value="cancel" class="btn btn-outline-secondary px-4">Cancel</button>
+            <button type="submit" name="action" value="overwrite" class="btn btn-warning px-4 fw-bold">Overwrite File</button>
+        </form>
+    </div>
+</body>
+</html>

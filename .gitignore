@@ -4,6 +4,8 @@
 # Local state and backups
 Formatted/
 last_sync.txt
+Uploaded_SOPs/
+staging/
 
 # Python cache
 __pycache__/
